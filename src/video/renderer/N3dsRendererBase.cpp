@@ -20,12 +20,16 @@
 #include "N3dsRenderer.hpp"
 #include "vshader_shbin.h"
 
+#include "../../diag.hpp"
+
 #include <3ds.h>
 #include <cstdlib>
 #include <cstring>
 #include <stdbool.h>
 #include <stdexcept>
 #include <unistd.h>
+
+bool N3dsRendererBase::stereo_sbs = false;
 
 N3dsRendererBase::N3dsRendererBase(gfxScreen_t screen_in, int surface_width_in,
                                    int surface_height_in, int image_width_in,
@@ -137,8 +141,48 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
             GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) |
             GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565));
 
-    // While the transfer is running, create a temporary command list to rotate
-    // the framebuffer into source
+    bool stereo = (screen == GFX_TOP) && gfxIs3D();
+    u64 present_start = svcGetSystemTick();
+    if (stereo && !stereo_sbs) {
+        // 3D slider up, but the stream is an ordinary flat picture. With the
+        // barrier on, each eye sees every other column of the 800-wide panel,
+        // so split the picture's columns the same way: even ones into the
+        // left-eye half of vramFb, odd ones into the right-eye half. Both eyes
+        // then see the whole image, offset by a single panel column - the
+        // "3D at the lowest notch" look that 3DS games are played in.
+        //
+        // Each half has surface_width / 2 rows (rows are screen columns, the
+        // framebuffer being rotated) and covers the full texture width, so a
+        // row spans two source columns; shifting the samples by a quarter of
+        // a row lands each eye on its own column of the pair.
+        int half_rows = surface_width / 2;
+        float shift = (image_width / (float)MOON_CTR_VIDEO_TEX_W) /
+                      (2.0f * surface_width);
+        u8 *right = (u8 *)vramFb + (size_t)surface_height * half_rows * px_size;
+        draw_pass(vramFb, half_rows, -shift, true);
+        draw_pass(right, half_rows, shift, false);
+    } else {
+        // Flat (wide mode), or side-by-side 3D where the stream itself
+        // carries one eye per half and the copy below splits it.
+        draw_pass(vramFb, surface_width, 0.0f, true);
+    }
+    copy_to_screen(stereo);
+    diag::add(diag::PRESENT, diag::us_since(present_start));
+    diag::flush_if_due();
+
+    perf_fbcopy_ticks = svcGetSystemTick() - start_ticks;
+    if (debug) {
+        draw_perf_counters();
+    }
+
+    gfxScreenSwapBuffers(screen, true);
+}
+
+void N3dsRendererBase::draw_pass(void *target, int rows, float s_shift,
+                                 bool wait_for_tile) {
+    // Build a command list that draws the tiled texture, rotated, into
+    // `target` (surface_height x `rows`, tiled). s_shift moves every sample
+    // along the texture's width, in texture coordinates.
     GPUCMD_SetBuffer(cmdlist, CMDLIST_SZ, 0);
 
     // TODO: Verify this mitigates rounding errors due to f24 precision issues.
@@ -146,12 +190,10 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
 #define C GPUCMD_AddWrite
 
     C(GPUREG_FRAMEBUFFER_INVALIDATE, 1);
-    C(GPUREG_COLORBUFFER_LOC, osConvertVirtToPhys(vramFb) >> 3);
+    C(GPUREG_COLORBUFFER_LOC, osConvertVirtToPhys(target) >> 3);
     C(GPUREG_DEPTHBUFFER_LOC, 0);
-    C(GPUREG_RENDERBUF_DIM,
-      (1 << 24) | ((surface_width - 1) << 12) | surface_height);
-    C(GPUREG_FRAMEBUFFER_DIM,
-      (1 << 24) | ((surface_width - 1) << 12) | surface_height);
+    C(GPUREG_RENDERBUF_DIM, (1 << 24) | ((rows - 1) << 12) | surface_height);
+    C(GPUREG_FRAMEBUFFER_DIM, (1 << 24) | ((rows - 1) << 12) | surface_height);
     C(GPUREG_FRAMEBUFFER_BLOCK32, 0);
 
     C(GPUREG_DEPTH_COLOR_MASK, 0xF << 8); // Write RGBA, no depth
@@ -168,8 +210,8 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
 
     C(GPUREG_VIEWPORT_WIDTH, f32tof24(surface_height / 2));
     C(GPUREG_VIEWPORT_INVW, f32tof31(2.0 / ((double)surface_height)) << 1);
-    C(GPUREG_VIEWPORT_HEIGHT, f32tof24(surface_width / 2));
-    C(GPUREG_VIEWPORT_INVH, f32tof31(2.0 / ((double)surface_width)) << 1);
+    C(GPUREG_VIEWPORT_HEIGHT, f32tof24(rows / 2));
+    C(GPUREG_VIEWPORT_INVH, f32tof31(2.0 / ((double)rows)) << 1);
 
     C(GPUREG_SCISSORTEST_MODE, 0);
     C(GPUREG_SCISSORTEST_POS, 0);
@@ -292,16 +334,16 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
     float hh = 2.0f / surface_width;
 
     ATTR(1.0, -1.0, 0.0, 0.0); // TR
-    ATTR(sw, -hh, 0.0, 0.0);
+    ATTR(sw + s_shift, -hh, 0.0, 0.0);
 
     ATTR(-1.0, -1.0, 0.0, 0.0); // TL
-    ATTR(sw, sh, 0.0, 0.0);
+    ATTR(sw + s_shift, sh, 0.0, 0.0);
 
     ATTR(1.0, 1.0, 0.0, 0.0); // BR
-    ATTR(0.0, -hh, 0.0, 0.0);
+    ATTR(0.0 + s_shift, -hh, 0.0, 0.0);
 
     ATTR(-1.0, 1.0, 0.0, 0.0); // BL
-    ATTR(0.0, sh, 0.0, 0.0);
+    ATTR(0.0 + s_shift, sh, 0.0, 0.0);
 
     // End Geometry Pipeline
     GPUCMD_AddMaskedWrite(GPUREG_START_DRAW_FUNC0, 1, 1);
@@ -315,7 +357,10 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
 
 #undef C
 
-    gspWaitForEvent(GSPGPU_EVENT_PPF, 0);
+    // the first pass waits for the tiling transfer started by the caller
+    if (wait_for_tile) {
+        gspWaitForEvent(GSPGPU_EVENT_PPF, 0);
+    }
 
     u32 *unused;
     u32 cmdlist_len;
@@ -330,9 +375,11 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
     GX_ProcessCommandList(cmdlist, cmdlist_len * 4, 2);
 
     gspWaitForEvent(GSPGPU_EVENT_P3D, 0);
+}
 
+void N3dsRendererBase::copy_to_screen(bool stereo) {
     // Copy into framebuffer, untiled
-    if ((screen == GFX_TOP) && gfxIs3D()) {
+    if (stereo) {
         // Left
         u32 *dest_left =
             (u32 *)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
@@ -369,11 +416,4 @@ void N3dsRendererBase::write_px_to_framebuffer_gpu(uint8_t *__restrict source) {
                                GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
     }
     gspWaitForEvent(GSPGPU_EVENT_PPF, 0);
-
-    perf_fbcopy_ticks = svcGetSystemTick() - start_ticks;
-    if (debug) {
-        draw_perf_counters();
-    }
-
-    gfxScreenSwapBuffers(screen, true);
 }

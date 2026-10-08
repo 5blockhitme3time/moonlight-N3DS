@@ -19,7 +19,9 @@
 
 #include "audio/audio.h"
 #include "config.hpp"
+#include "diag.hpp"
 #include "input/n3ds_input.hpp"
+#include "panel/panel_controller.hpp"
 #include "system/dispatcher.hpp"
 #include "system/n3ds_connection.hpp"
 #include "system/pair_record.hpp"
@@ -385,7 +387,9 @@ static inline void dispatch_loop(void *_unused_) {
 static inline void input_loop(void *input_handler_in) {
     N3dsInput *input_handler = static_cast<N3dsInput *>(input_handler_in);
     auto connection_listener = N3dsConnectionListener::get_instance();
-    input_handler->force_touchscreen_menu();
+    // The dialogue panel takes the bottom screen. HOME still opens the original
+    // menu, which remains the way to reach the other touch modes.
+    input_handler->force_dialogue_panel();
     while (!connection_listener->is_connection_closed()) {
         gspWaitForAnyEvent();
         input_handler->n3dsinput_handle_event();
@@ -395,6 +399,12 @@ static inline void input_loop(void *input_handler_in) {
 static inline void stream_loop(PCONFIGURATION config,
                                N3dsConnectionListener *connection_listener,
                                std::shared_ptr<N3dsInput> input_handler) {
+    // The dialogue relay runs on the PC that is streaming, so the stream
+    // address is also the relay address; only the port is configurable
+    // (relay_port in moonlight.conf, default 8787).
+    PanelController panel;
+    panel.start(config->address, config->relay_port);
+
     // Spin off worker threads
     size_t stack_size = 0x20000;
     s32 priority = 0x30;
@@ -407,7 +417,11 @@ static inline void stream_loop(PCONFIGURATION config,
 
     // Run the main connection loop
     while (!connection_listener->is_connection_closed() && aptMainLoop()) {
+        diag::Timer loop_timer(diag::LOOP);
         gspWaitForAnyEvent();
+        // Cheap when nothing changed: it redraws only when the text or the
+        // panel's own state does.
+        panel.tick();
         if (aptShouldClose()) {
             connection_listener->connection_terminated(0);
         }
@@ -598,9 +612,11 @@ static void action_quit_stream(SERVER_DATA *server) {
 
 int main_loop(int argc, char *argv[]) {
     init_3ds();
+    diag::init();
 
     CONFIGURATION config;
     config_parse(argc, argv, &config);
+    N3dsRendererBase::stereo_sbs = config.sbs_3d;
 
     while (aptMainLoop()) {
         auto address_string = prompt_for_address();

@@ -125,6 +125,14 @@ void VideoDecoderBase::_accept_touch_state_changed(N3dsTouchType ttype) {
         (static_cast<N3dsRendererNormal *>(renderer.get()))
             ->set_bottom_screen(menu_bgr);
         break;
+    case (N3dsTouchType::DIALOGUE):
+        // Top screen streams the game as usual, but no bottom image is pushed:
+        // the panel controller owns that screen and repaints it whenever a new
+        // line arrives, which is far more often than a mode switch.
+        renderer = std::make_unique<N3dsRendererNormal>(
+            surface_width, surface_height, image_width, image_height,
+            pixel_size);
+        break;
     default: // Disabled
         renderer = std::make_unique<N3dsRendererMock>();
         break;

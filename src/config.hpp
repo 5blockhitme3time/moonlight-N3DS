@@ -56,6 +56,11 @@ typedef struct _CONFIGURATION {
     bool swap_face_buttons;
     bool swap_triggers_and_shoulders;
     bool use_triggers_for_mouse;
+    // Port of the dialogue relay (relay.py), which runs on the stream host.
+    int relay_port;
+    // 3D slider up: show the stream as side-by-side 3D instead of the same
+    // flat picture to both eyes.
+    bool sbs_3d;
 } CONFIGURATION, *PCONFIGURATION;
 
 bool config_file_parse(char *filename, PCONFIGURATION config);

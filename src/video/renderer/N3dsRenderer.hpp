@@ -46,9 +46,15 @@ class N3dsRendererBase {
                      bool debug_in = false);
     virtual ~N3dsRendererBase();
 
+    // With the 3D slider up: false (default) shows the flat stream to both
+    // eyes; true treats it as side-by-side 3D, left half to the left eye.
+    static bool stereo_sbs;
+
   protected:
     inline void draw_perf_counters();
     void write_px_to_framebuffer_gpu(uint8_t *__restrict source);
+    void draw_pass(void *target, int rows, float s_shift, bool wait_for_tile);
+    void copy_to_screen(bool stereo);
     void ensure_3d_enabled();
     void ensure_3d_disabled();
     inline void write24(u8 *p, u32 val);

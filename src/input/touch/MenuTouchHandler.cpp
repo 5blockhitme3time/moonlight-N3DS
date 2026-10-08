@@ -31,7 +31,11 @@ static std::map<int, std::map<int, N3dsTouchType>> button_map{
     {0, {{0, N3dsTouchType::GAMEPAD}, {1, N3dsTouchType::MOUSEPAD}}},
     {1, {{0, N3dsTouchType::KEYBOARD}, {1, N3dsTouchType::ABSOLUTE_TOUCH}}},
     {2, {{0, N3dsTouchType::DS_TOUCH}, {1, N3dsTouchType::MAGNIFY_TOUCH}}},
-    {3, {{0, N3dsTouchType::DEBUG_TOUCH}, {1, N3dsTouchType::DISABLED}}},
+    // The debug console gave way to the dialogue panel, so the menu is also
+    // the way back to it: DIALOG for reading, MIRROR for operating the game's
+    // own UI (save screen, config) where see-and-tap beats a mirrored panel.
+    // menu.png was relettered to match.
+    {3, {{0, N3dsTouchType::DIALOGUE}, {1, N3dsTouchType::DISABLED}}},
 };
 
 MenuTouchHandler::MenuTouchHandler() { aptSetHomeAllowed(true); }

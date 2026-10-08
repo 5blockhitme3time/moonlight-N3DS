@@ -197,3 +197,16 @@ class MagnifyTouchHandler : public TouchHandlerBase {
     int x_touch_offset = 0;
     int y_touch_offset = 0;
 };
+
+// Hands touches to the dialogue panel. None are forwarded as mouse input: the
+// bottom screen shows the panel, not the game.
+class DialogueTouchHandler : public TouchHandlerBase {
+  public:
+    DialogueTouchHandler() = default;
+    ~DialogueTouchHandler() = default;
+
+  private:
+    void _handle_touch_down(touchPosition touch) override;
+    void _handle_touch_up(touchPosition touch) override;
+    void _handle_touch_hold(touchPosition touch) override;
+};

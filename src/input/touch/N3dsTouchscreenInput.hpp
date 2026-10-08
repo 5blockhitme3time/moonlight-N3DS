@@ -34,6 +34,9 @@ class N3dsTouchscreenInput : public ISubscriber {
 
     void n3dsinput_handle_touch(u32 kDown, u32 kUp);
 
+    // The mode in effect after the last handle_touch call.
+    N3dsTouchType current_touch_type() const { return touch_type; }
+
   private:
     void _n3dsinput_set_touch(N3dsTouchType touch_type_in);
 

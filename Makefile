@@ -42,6 +42,8 @@ SOURCES		:=	src \
 				src/input/touch \
 				src/video/ \
 				src/video/renderer \
+				src/panel \
+				src/relay \
 				libgamestream \
 				third_party/h264bitstream \
 				third_party/libuuid \
@@ -50,6 +52,8 @@ SOURCES		:=	src \
 				third_party/moonlight-common-c/src
 DATA		:=	3ds/data
 INCLUDES	:=	src \
+				src/panel \
+				src/relay \
 				libgamestream \
 				third_party/h264bitstream \
 				third_party/libuuid \
@@ -92,6 +96,16 @@ CFLAGS	:=	-g -Wall -O2 -mword-relocations -Wno-psabi \
 
 # TODO: Reenable build warnings and actually address them
 CFLAGS	+=	$(INCLUDE) -D__3DS__ -DUSE_MBEDTLS -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
+
+# FreeType is linked by the original project but nothing included its headers,
+# so ft2build.h was not on the search path. The dialogue panel rasterises CJK
+# glyphs with it, which needs the headers as well as the library.
+CFLAGS	+=	-I$(PORTLIBS)/include/freetype2
+
+# `make DIAG=1`: per-second timing log on the SD card (src/diag.hpp).
+ifeq ($(DIAG),1)
+CFLAGS	+=	-DKP_DIAG
+endif
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fexceptions -std=gnu++17
 
@@ -274,6 +288,16 @@ $(OUTPUT).elf	:	$(OFILES)
 # you need a rule like this for each extension you use as binary data
 #---------------------------------------------------------------------------------
 %.bin.o	%_bin.h :	%.bin
+#---------------------------------------------------------------------------------
+	@echo $(notdir $<)
+	@$(bin2o)
+
+#---------------------------------------------------------------------------------
+# The CJK font is embedded rather than read from the SD card: one less file to
+# install, and no path that can be got wrong. FreeType loads it from memory
+# with FT_New_Memory_Face. Swapping the font means rebuilding.
+#---------------------------------------------------------------------------------
+%.ttf.o	%_ttf.h :	%.ttf
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
 	@$(bin2o)

@@ -42,6 +42,11 @@ enum class N3dsTouchType {
     MAGNIFY_TOUCH,
     MENU_TOUCH,
     DEBUG_TOUCH,
+    // Dialogue panel owns the bottom screen: the renderer leaves it alone and
+    // the panel controller draws into it, while taps go to the panel's buttons
+    // first and fall through to the normal handlers otherwise. Appended last so
+    // the existing enumerators keep their values.
+    DIALOGUE,
 };
 class TouchStateChangedMsg : public IMessage {
   public:

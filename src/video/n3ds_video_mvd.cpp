@@ -19,6 +19,8 @@
 
 #include "video.hpp"
 
+#include "../diag.hpp"
+
 #include <3ds.h>
 
 #include <Limelight.h>
@@ -124,6 +126,11 @@ DecodeReturnStatus MvdDecoder::_decode(unsigned char *indata, int inlen) {
 }
 
 int MvdDecoder::submit_decode_unit(PDECODE_UNIT decodeUnit) {
+    // call intervals and work done, for the once-every-few-seconds stutter
+    static diag::Interval frame_iv(diag::FRAME), unit_iv(diag::GAP);
+    frame_iv.tick();
+    unit_iv.tick();
+
     u64 start_ticks = svcGetSystemTick();
     PLENTRY entry = decodeUnit->bufferList;
     int length = 0;
@@ -148,6 +155,8 @@ int MvdDecoder::submit_decode_unit(PDECODE_UNIT decodeUnit) {
     renderer->set_perf_decode_ticks(svcGetSystemTick() - start_ticks);
     renderer->write_px_to_framebuffer(rgb_img_buffer);
     renderer_lock.unlock();
+    diag::add(diag::DECODE, diag::us_since(start_ticks));
+    diag::flush_if_due();
 
     // If MVD never gets an IDR frame, everything shows up gray
     if (first_frame) {

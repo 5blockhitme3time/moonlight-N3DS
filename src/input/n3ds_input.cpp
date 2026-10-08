@@ -18,6 +18,7 @@
  */
 
 #include "n3ds_input.hpp"
+#include "../panel/panel_input.hpp"
 #include "../system/dispatcher.hpp"
 #include "touch/TouchHandler.hpp"
 
@@ -175,6 +176,48 @@ void N3dsInput::force_touchscreen_menu() {
     MessageDispatcher::get_instance()->post(message);
 }
 
+void N3dsInput::force_dialogue_panel() {
+    auto message =
+        std::make_shared<TouchStateChangedMsg>(N3dsTouchType::DIALOGUE);
+    MessageDispatcher::get_instance()->post(message);
+}
+
+// In the dialogue panel the face buttons, L/R, up/down and Start drive the
+// panel instead of the virtual gamepad: the game takes no gamepad input, so
+// as pad buttons they would do nothing. They are removed from kDown/kUp so
+// the gamepad code below never sees them. Everything else (Select, ZL/ZR,
+// left/right, the sticks) still goes to the PC as before.
+u32 N3dsInput::_route_to_panel(u32 &kDown, u32 &kUp) {
+    const struct {
+        u32 key;
+        PanelKey panel;
+    } map[] = {
+        {CUSTOM_KEY_A, PANEL_KEY_ADVANCE}, {CUSTOM_KEY_B, PANEL_KEY_BACK},
+        {CUSTOM_KEY_X, PANEL_KEY_AUTO},    {CUSTOM_KEY_Y, PANEL_KEY_VOICE},
+        {CUSTOM_KEY_L, PANEL_KEY_HISTORY}, {CUSTOM_KEY_R, PANEL_KEY_SKIP},
+        {KEY_DUP, PANEL_KEY_UP},           {KEY_DDOWN, PANEL_KEY_DOWN},
+        {KEY_START, PANEL_KEY_MENU},
+    };
+    bool panel_mode =
+        touch_handler->current_touch_type() == N3dsTouchType::DIALOGUE;
+    u32 taken = 0;
+    for (const auto &m : map) {
+        if ((kDown & m.key) && panel_mode) {
+            panel_held |= m.key;
+            panel_key_push(m.panel, true);
+            taken |= m.key;
+        }
+        if ((kUp & m.key) && (panel_held & m.key)) {
+            panel_held &= ~m.key;
+            panel_key_push(m.panel, false);
+            taken |= m.key;
+        }
+    }
+    kDown &= ~taken;
+    kUp &= ~taken;
+    return taken;
+}
+
 void N3dsInput::n3dsinput_handle_event() {
     hidScanInput();
     u32 kDown = hidKeysDown();
@@ -182,6 +225,7 @@ void N3dsInput::n3dsinput_handle_event() {
     previous_state = gamepad_state;
 
     touch_handler->n3dsinput_handle_touch(kDown, kUp);
+    _route_to_panel(kDown, kUp);
 
     if (kDown & ~KEY_TOUCH) {
         gamepad_state.buttons |= _n3ds_to_li_buttons(kDown);

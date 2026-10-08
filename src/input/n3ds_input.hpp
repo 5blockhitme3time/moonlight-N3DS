@@ -32,6 +32,9 @@ class N3dsInput : public ISubscriber {
     void accept(IMessage *msg) override;
     void n3dsinput_handle_event();
     void force_touchscreen_menu();
+    // Hands the bottom screen to the dialogue panel. The HOME button still
+    // brings the original menu back, so the panel is not a one-way door.
+    void force_dialogue_panel();
 
   private:
     void _add_gamepad();
@@ -62,4 +65,10 @@ class N3dsInput : public ISubscriber {
     uint32_t CUSTOM_KEY_R;
     uint32_t CUSTOM_KEY_ZL;
     uint32_t CUSTOM_KEY_ZR;
+
+    // Buttons pressed while the dialogue panel had the bottom screen belong
+    // to the panel until they are released, whatever the mode is by then, so
+    // neither side ever sees half a press.
+    u32 panel_held = 0;
+    u32 _route_to_panel(u32 &kDown, u32 &kUp);
 };
